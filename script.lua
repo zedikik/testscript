@@ -8,7 +8,7 @@ local playerGui = player.PlayerGui
 
 local camera = workspace.CurrentCamera
 
---local Bracket = loadstring(game:HttpGet("https://raw.githubusercontent.com/AlexR32/Bracket/refs/heads/main/BracketV32.lua"))() -- https://raw.githubusercontent.com/zedikik/BracketV32/refs/heads/main/BracketV32.lua
+local Bracket = loadstring(game:HttpGet("https://raw.githubusercontent.com/AlexR32/Bracket/main/BracketV32.lua"))() -- https://raw.githubusercontent.com/zedikik/BracketV32/refs/heads/main/BracketV32.lua
 
 print("Skuff Auto Farm: Shared Loading...")
 
