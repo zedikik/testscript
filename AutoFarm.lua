@@ -11,9 +11,12 @@ local Bracket = loadstring(game:HttpGet("https://raw.githubusercontent.com/AlexR
 
 if not _G.autoFarm then
 	_G.autoFarm = false
+	_G.autoFarmConnection = nil
+	_G.autoFarmIsAttacking = nil
 	_G.autoFarmKillHealthThreshold = 15
 	_G.autoFarmSelfPreservation = false
 	_G.autoFarmSelfHealthThreshold = 30
+	_G.autoFarmAfkConnection = nil
 	_G.autoFarmAFKMode = "Standart"
 
 	_G.autoFarmPreviewToggle = false
@@ -31,12 +34,14 @@ if not _G.autoFarm then
 	_G.autoFarmAntiStreak = false
 	_G.autoFarmAntiStreakLimit = 7
 	_G.autoFarmPredictToggle = false
+	_G.autoFarmPredictionStrength = 0.85
 	
 	_G.autoFarmStats = {
 		kills = 0,
-		deaths = 0,
 		startTime = 0,
 	}
+
+	_G.autoFarmRecentAttacked = {}
 end
 
 local StatusFarmingLabel = nil
@@ -50,50 +55,343 @@ local function updateStats()
 	local seconds = math.floor(uptime % 60)
 	local kph = uptime > 60 and math.floor((_G.autoFarmStats.kills / uptime) * 3600) or 0
 
-	StatusFarmingLabel:SetText(string.format("%d Kills | %d Deaths | %02d:%02d:%02d | %d Kills/H", _G.autoFarmStats.kills, _G.autoFarmStats.deaths, hours, minutes, seconds, kph))
+	StatusFarmingLabel:SetText(string.format("%d Kills | %02d:%02d:%02d | %d Kills/H", _G.autoFarmStats.kills, hours, minutes, seconds, kph))
+end
+
+local function predictPosition(target)
+	if not _G.autoFarmPredictToggle then return end
+	if not target or not target.Character or not target.Character:FindFirstChild("HumanoidRootPart") then return end
+
+	local hrp = target.Character.HumanoidRootPart
+	local vel = hrp.AssemblyLinearVelocity
+
+	if vel.Magnitude < 2 then return end
+
+	local predictTime = _G.autoFarmPredictionStrength
+	local predictedPos = hrp.Position + vel * predictTime
+
+	return CFrame.new(predictedPos)
 end
 
 local characterData = {
-	--TrashCan = { name = "TrashCan", working = false, priority = {1}, slots = { ... } },
+	TrashCan = {
+		name = "TrashCan",
+		working = false,
+		priority = {1},
+		slots = {
+			{
+				slot = 1,
+				skill = "Throw",
+				usable = true,
+				condition = function(target) return true end,
+				move = function(target)
+					return target.Character.HumanoidRootPart.CFrame - (target.Character.HumanoidRootPart.CFrame.LookVector * 3) + target.Character.Humanoid.MoveDirection
+				end,
+				moveDuration = 1.2,
+				chargeTime = 0,
+				attackDelay = 0.1,
+				waitAfterAttack = 1.8
+			}
+		}
+	},
 
 	Cyborg = {
 		name = "Cyborg",
 		working = true,
 		priority = {4, 3, 2},
 		slots = {
-			{slot = 1, skill = "Machine Gun Blows", usable = false, condition = function() return true end, move = function() return nil end, moveDuration = 0, chargeTime = 0, attackDelay = 0, waitAfterAttack = 0},
-			{slot = 2, skill = "Ignition Burst", usable = true, condition = function() return true end,
-			move = function(target) 
-				local cf = target.Character.HumanoidRootPart.CFrame
-				return cf - (cf.LookVector * 7) + target.Character.Humanoid.MoveDirection
-			end,
-			moveDuration = 1.25, chargeTime = 1, attackDelay = 0, waitAfterAttack = 1.25},
-			{slot = 3, skill = "Blitz Shot", usable = true, condition = function() return true end,
-			move = function(target)
-				local cf = target.Character.HumanoidRootPart.CFrame
-				return CFrame.lookAt(cf.Position + Vector3.new(30, 30, 0), cf.Position + target.Character.Humanoid.MoveDirection * target.Character.Humanoid.WalkSpeed * 1.25)
-			end,
-			moveDuration = 1.25, chargeTime = 2.5, attackDelay = 0, waitAfterAttack = 1.25},
-			{slot = 4, skill = "Jet Dive", usable = true, condition = function() return true end,
-			move = function(target)
-				local cf = target.Character.HumanoidRootPart.CFrame
-				return CFrame.new(Vector3.new(cf.Position.X, cf.Position.Y, cf.Position.Z + 65) + target.Character.Humanoid.MoveDirection * target.Character.Humanoid.WalkSpeed * 1.25,
-					Vector3.new(cf.Position.X, player.Character.HumanoidRootPart.Position.Y, cf.Position.Z))
-			end,
-			moveDuration = 1.65, chargeTime = 0, attackDelay = 0.25, waitAfterAttack = 4},
+			{
+				slot = 1,
+				skill = "Machine Gun Blows",
+				usable = false,
+				condition = function() return true end,
+				move = function(target) return target.Character.HumanoidRootPart.CFrame end,
+				moveDuration = 0,
+				chargeTime = 0,
+				attackDelay = 0,
+				waitAfterAttack = 0
+			},
+			{
+				slot = 2,
+				skill = "Ignition Burst",
+				usable = true,
+				condition = function(target) return true end,
+				move = function(target)
+					local cf = target.Character.HumanoidRootPart.CFrame
+					return cf - (cf.LookVector * 7) + target.Character.Humanoid.MoveDirection
+				end,
+				moveDuration = 1.25,
+				chargeTime = 1,
+				attackDelay = 0,
+				waitAfterAttack = 1.25
+			},
+			{
+				slot = 3,
+				skill = "Blitz Shot",
+				usable = true,
+				condition = function(target) return true end,
+				move = function(target)
+					local cf = target.Character.HumanoidRootPart.CFrame
+					return CFrame.lookAt(cf.Position + Vector3.new(30, 30, 0), cf.Position + target.Character.Humanoid.MoveDirection * target.Character.Humanoid.WalkSpeed * 1.25)
+				end,
+				moveDuration = 1.25,
+				chargeTime = 2.5,
+				attackDelay = 0,
+				waitAfterAttack = 1.25
+			},
+			{
+				slot = 4,
+				skill = "Jet Dive",
+				usable = true,
+				condition = function(target) return true end,
+				move = function(target)
+					local cf = target.Character.HumanoidRootPart.CFrame
+					return CFrame.new(Vector3.new(cf.Position.X, cf.Position.Y, cf.Position.Z + 65) + target.Character.Humanoid.MoveDirection * target.Character.Humanoid.WalkSpeed * 1.25,Vector3.new(cf.Position.X, player.Character.HumanoidRootPart.Position.Y, cf.Position.Z))
+				end,
+				moveDuration = 1.65,
+				chargeTime = 0,
+				attackDelay = 0.25,
+				waitAfterAttack = 4
+			},
+		}
+	},
+
+	Hunter = {
+		name = "Hunter",
+		working = true,
+		priority = {1, 2, 3},
+		slots = {
+			{
+				slot = 1,
+				skill = "Flowing Water",
+				usable = true,
+				condition = function() return true end,
+				move = function(target)
+					local cf = target.Character.HumanoidRootPart.CFrame
+					return cf - (cf.LookVector * 3.5) + target.Character.Humanoid.MoveDirection
+				end,
+				moveDuration = 2,
+				chargeTime = 0,
+				attackDelay = 0,
+				waitAfterAttack = 2
+			},
+			{
+				slot = 2,
+				skill = "Lethal Whirlwind Stream",
+				usable = true,
+				condition = function() return true end,
+				move = function(target)
+					local cf = target.Character.HumanoidRootPart.CFrame
+					return cf - (cf.LookVector * 3.5) + target.Character.Humanoid.MoveDirection
+				end,
+				moveDuration = 2,
+				chargeTime = 0,
+				attackDelay = 0,
+				waitAfterAttack = 2
+			},
+			{
+				slot = 3,
+				skill = "Hunter's Grasp",
+				usable = true,
+				condition = function() return true end,
+				move = function(target)
+					local cf = target.Character.HumanoidRootPart.CFrame
+					return cf - (cf.LookVector * 1) + target.Character.Humanoid.MoveDirection
+				end,
+				moveDuration = 2,
+				chargeTime = 0,
+				attackDelay = 0,
+				waitAfterAttack = 2
+			},
+		}
+	},
+
+	Ninja = {
+		name = "Ninja",
+		working = true,
+		priority = {1, 2, 4, 3},
+		slots = {
+			{
+				slot = 1,
+				skill = "Flash Strike",
+				usable = true,
+				condition = function() return true end,
+				move = function(target)
+					local cf = target.Character.HumanoidRootPart.CFrame
+					return cf - (cf.LookVector * 8) + target.Character.Humanoid.MoveDirection
+				end,
+				moveDuration = 1,
+				chargeTime = 0.1,
+				attackDelay = 0,
+				waitAfterAttack = 1
+			},
+			{
+				slot = 2,
+				skill = "Whirlwind Kick",
+				usable = true,
+				condition = function(target) return target.Character.Humanoid.Health < 12 end,
+				move = function(target)
+					local cf = target.Character.HumanoidRootPart.CFrame
+					return cf - (cf.LookVector * 1) + target.Character.Humanoid.MoveDirection
+				end,
+				moveDuration = 1.5,
+				chargeTime = 0.4,
+				attackDelay = 0,
+				waitAfterAttack = 1.5
+			},
+			{
+				slot = 3,
+				skill = "Scatter",
+				usable = true,
+				condition = function() return true end,
+				move = function(target)
+					local cf = target.Character.HumanoidRootPart.CFrame
+					return cf
+				end,
+				moveDuration = 4,
+				chargeTime = 0,
+				attackDelay = 0,
+				waitAfterAttack = 4
+			},
+			{
+				slot = 4,
+				skill = "Explosive Shuriken",
+				usable = true,
+				condition = function() return true end,
+				move = function(target)
+					local cf = target.Character.HumanoidRootPart.CFrame
+					return cf - (cf.LookVector * 7) + target.Character.Humanoid.MoveDirection
+				end,
+				moveDuration = 2,
+				chargeTime = 0,
+				attackDelay = 0,
+				waitAfterAttack = 2
+			},
+		}
+	},
+
+	Esper = {
+		name = "Esper",
+		working = true,
+		priority = {1, 3, 4, 2},
+		slots = {
+			{
+				slot = 1,
+				skill = "Crushing Pull",
+				usable = true,
+				condition = function(target) return target.Character.Humanoid.Health <= 13 end,
+				move = function(target)
+					local cf = target.Character.HumanoidRootPart.CFrame
+					return cf - (cf.LookVector * 4.5) + target.Character.Humanoid.MoveDirection
+				end,
+				moveDuration = 2,
+				chargeTime = 0.25,
+				attackDelay = 0,
+				waitAfterAttack = 2
+			},
+			{
+				slot = 2,
+				skill = "Windstorm Fury",
+				usable = true,
+				condition = function(target) return target.Character.Humanoid.Health <= 8 end,
+				move = function(target)
+					local cf = target.Character.HumanoidRootPart.CFrame
+					return cf - (cf.LookVector * 1.5) + target.Character.Humanoid.MoveDirection
+				end,
+				moveDuration = 1.5,
+				chargeTime = 0,
+				attackDelay = 0,
+				waitAfterAttack = 1.5
+			},
+			{
+				slot = 3,
+				skill = "Stone Coffin",
+				usable = true,
+				condition = function(target) return target.Character.Humanoid.Health <= 12 end,
+				move = function(target)
+					local cf = target.Character.HumanoidRootPart.CFrame
+					return cf - (cf.LookVector * 3) + target.Character.Humanoid.MoveDirection
+				end,
+				moveDuration = 1.5,
+				chargeTime = 0.15,
+				attackDelay = 0,
+				waitAfterAttack = 1.5
+			},
+			{
+				slot = 4,
+				skill = "Expulsive Push",
+				usable = true,
+				condition = function(target) return target.Character.Humanoid.Health <= 13 end,
+				move = function(target)
+					local cf = target.Character.HumanoidRootPart.CFrame
+					return cf - (cf.LookVector * 1.5) + target.Character.Humanoid.MoveDirection
+				end,
+				moveDuration = 1.5,
+				chargeTime = 1,
+				attackDelay = 0,
+				waitAfterAttack = 1.5
+			},
+		}
+	},
+
+	Blade = {
+		name = "Blade",
+		working = true,
+		priority = {1, 2, 3},
+		slots = {
+			{
+				slot = 1,
+				skill = "Quick Slice",
+				usable = true,
+				condition = function() return true end,
+				move = function(target)
+					local cf = target.Character.HumanoidRootPart.CFrame
+					return cf - (cf.LookVector * 6) + target.Character.Humanoid.MoveDirection
+				end,
+				moveDuration = 0.5,
+				chargeTime = 0.2,
+				attackDelay = 0,
+				waitAfterAttack = 0.5
+			},
+			{
+				slot = 2,
+				skill = "Atmos Cleave",
+				usable = true,
+				condition = function() return true end,
+				move = function(target)
+					local cf = target.Character.HumanoidRootPart.CFrame
+					return cf - (cf.LookVector * 3) + target.Character.Humanoid.MoveDirection
+				end,
+				moveDuration = 2,
+				chargeTime = 0,
+				attackDelay = 0,
+				waitAfterAttack = 2
+			},
+			{
+				slot = 3,
+				skill = "Pinpoint Cut",
+				usable = true,
+				condition = function() return true end,
+				move = function(target)
+					local cf = target.Character.HumanoidRootPart.CFrame
+					return cf - (cf.LookVector * 6) + target.Character.Humanoid.MoveDirection
+				end,
+				moveDuration = 1,
+				chargeTime = 0,
+				attackDelay = 0,
+				waitAfterAttack = 1
+			},
 		}
 	},
 }
 
-local isAttacking = false
-local autoFarmConnection = nil
-local afkConnection = nil
-
 local function executeSkill(ability: {any}, target: Player)
-	if isAttacking then return end
-	isAttacking = true
+	if _G.autoFarmIsAttacking then return end
+	_G.autoFarmIsAttacking = true
+	
+	_G.autoFarmRecentAttacked[target] = tick()
 
-	print(`[AutoFarm] Executing {ability.skill} → {target.Name}`)
+	print(`[AutoFarm] Executing {ability.skill} -> {target.Name}`)
 
 	if ability.chargeTime > 0 then task.wait(ability.chargeTime) end
 
@@ -102,7 +400,13 @@ local function executeSkill(ability: {any}, target: Player)
 			local start = tick()
 			local hrp = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
 			while tick() - start < ability.moveDuration and hrp and target.Character and target.Character:FindFirstChild("HumanoidRootPart") do
-				hrp.CFrame = ability.move(target)
+				local baseCFrame = ability.move(target)
+				local predicted = predictPosition(target)
+				if _G.autoFarmPredictToggle and (predicted and baseCFrame) then
+					hrp.CFrame = CFrame.new(predicted.Position) * (baseCFrame - baseCFrame.Position)
+				else
+					hrp.CFrame = baseCFrame
+				end
 				RunService.Heartbeat:Wait()
 			end
 		end)()
@@ -118,10 +422,10 @@ local function executeSkill(ability: {any}, target: Player)
 
 	if ability.waitAfterAttack > 0 then task.wait(ability.waitAfterAttack) end
 
-	isAttacking = false
+	_G.autoFarmIsAttacking = false
 end
 
-local function visualize(target)
+local function visualize(target: Player)
 	if _G.autoFarmPreviewToggle and target and target.Character then
 		if _G.autoFarmPreviewType == "Camera View" then
 			camera.CameraSubject = target.Character.Humanoid or target.Character.HumanoidRootPart
@@ -144,13 +448,12 @@ local function visualize(target)
 	end
 end
 
-local function afkMode(state)
+local function afkMode(state: number)
 	if state == 1 then
-		if afkConnection then afkConnection:Disconnect() end
-
-		afkConnection = RunService.Heartbeat:Connect(function()
+		if _G.autoFarmAfkConnection then _G.autoFarmAfkConnection:Disconnect() end
+		_G.autoFarmAfkConnection = RunService.Heartbeat:Connect(function()
 			if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return end
-			if player.Character.Humanoid.Health <= 1 then return end
+			if player.Character.Humanoid.Health <= 0 then return end
 
 			if _G.autoFarmAntiFling then
 				for _, v in pairs(player.Character:GetDescendants()) do
@@ -167,34 +470,18 @@ local function afkMode(state)
 
 			if _G.autoFarmAFKMode == "Standart" then
 				player.Character.HumanoidRootPart.CFrame = CFrame.new(0, 200, 0)
-			elseif _G.autoFarmAFKMode == "Absolute Immortal" then
-				-- TODO: Потом нахуй
-				print("Absolute Immortal AFK: not implemented yet")
 			end
 		end)
 	else
-		if afkConnection then
-			afkConnection:Disconnect()
-			afkConnection = nil
-		end
+		if _G.autoFarmAfkConnection then _G.autoFarmAfkConnection:Disconnect() _G.autoFarmAfkConnection = nil end
 	end
 end
 
-local function AutoFarm(state)
+local function AutoFarm(state: number)
 	if state == 0 then
 		_G.autoFarm = false
-		if autoFarmConnection then autoFarmConnection:Disconnect() end
-		
-		camera.CameraSubject = player.Character and (player.Character.Humanoid or player.Character.HumanoidRootPart)
-		for _, plr in ipairs(Players:GetPlayers()) do
-			if plr.Character then
-				local hl = plr.Character:FindFirstChild("TargetHighlight")
-				if hl then hl:Destroy() end
-			end
-		end
-		
+		if _G.autoFarmConnection then _G.autoFarmConnection:Disconnect() end
 		afkMode(0)
-		
 		print("AutoFarm: Disabled")
 		return
 	end
@@ -203,8 +490,8 @@ local function AutoFarm(state)
 	_G.autoFarmStats.startTime = tick()
 	print("AutoFarm: Enabled")
 
-	autoFarmConnection = RunService.RenderStepped:Connect(function()
-		if not _G.autoFarm or isAttacking then return end
+	_G.autoFarmConnection = RunService.RenderStepped:Connect(function()
+		if not _G.autoFarm or _G.autoFarmIsAttacking then return end
 
 		if _G.autoFarmSelfPreservation and player.Character and player.Character.Humanoid.Health <= _G.autoFarmSelfHealthThreshold then
 			afkMode(1)
@@ -216,7 +503,7 @@ local function AutoFarm(state)
 			for _, v in ipairs(Players:GetPlayers()) do
 				if v ~= player and v.Character and v.Character:FindFirstChild("Humanoid") and v.Character:FindFirstChild("HumanoidRootPart") then
 					local hp = v.Character.Humanoid.Health
-					if hp >= 2 and math.floor(hp) <= _G.autoFarmKillHealthThreshold then
+					if hp > 1 and math.floor(hp) <= _G.autoFarmKillHealthThreshold then
 						if not _G.autoFarmIgnoreFriends or not table.find(_G.selectedFriends or {}, v.Name) then
 							table.insert(targetList, v)
 						end
@@ -228,13 +515,10 @@ local function AutoFarm(state)
 
 			if _G.autoFarmPriorityToggle then
 				if _G.autoFarmPriorityType == "Health" then
-					table.sort(targetList, function(a, b)
-						return a.Character.Humanoid.Health < b.Character.Humanoid.Health
-					end)
+					table.sort(targetList, function(a, b) return a.Character.Humanoid.Health < b.Character.Humanoid.Health end)
 				elseif _G.autoFarmPriorityType == "Distance" then
 					table.sort(targetList, function(a, b)
-						return (player.Character.HumanoidRootPart.Position - a.Character.HumanoidRootPart.Position).Magnitude <
-							(player.Character.HumanoidRootPart.Position - b.Character.HumanoidRootPart.Position).Magnitude
+						return (player.Character.HumanoidRootPart.Position - a.Character.HumanoidRootPart.Position).Magnitude < (player.Character.HumanoidRootPart.Position - b.Character.HumanoidRootPart.Position).Magnitude
 					end)
 				end
 				return targetList[1]
@@ -251,7 +535,7 @@ local function AutoFarm(state)
 		visualize(target)
 
 		local charName = player.Character and player.Character:GetAttribute("Character")
-		if not charName or not characterData[charName] or not characterData[charName].working then return end
+		if not charName or not characterData[charName] then return end
 
 		local charData = characterData[charName]
 
@@ -325,12 +609,7 @@ FarmSection:Dropdown({
 	},
 })
 
-StatusFarmingLabel = FarmSection:Label({Text = "0 Kills | 0 Deaths | 00:00:00 | 0 Kills/H"})
-
-FarmVisualsSection:Button({
-	Name = "ResetStats",
-	Callback = function() StatusFarmingLabel:SetText("0 Kills | 0 Deaths | 00:00:00 | 0 Kills/H") end,
-})
+StatusFarmingLabel = FarmSection:Label({Text = "0 Kills | 00:00:00 | 0 Kills/H"})
 
 FarmVisualsSection:Toggle({
 	Name = "Show Preview",
@@ -369,13 +648,6 @@ FarmVisualsSection:Colorpicker({
 	Flag = "Combat/AutoFarm/VisualizeTarget/Color",
 	Value = _G.autoFarmVisualizeColor or {0,1,1,0,false},
 	Callback = function(v,c) _G.autoFarmVisualizeColor = v end
-})
-
-FarmFiltersSection:Toggle({
-	Name = "Use Target Priority",
-	Flag = "Combat/AutoFarm/Priority/Toggle",
-	Value = _G.autoFarmPriorityToggle or false,
-	Callback = function(v) _G.autoFarmPriorityToggle = v end
 })
 
 FarmFiltersSection:Toggle({
@@ -433,15 +705,45 @@ FarmExtraFuncsSection:Slider({
 
 FarmExtraFuncsSection:Toggle({
 	Name = "Movement Prediction",
-	Flag = "Combat/AutoFarm/Predict/Toggle",
-	Value = _G.autoFarmPredictToggle or false,
+	Value = _G.autoFarmPredictToggle,
 	Callback = function(v) _G.autoFarmPredictToggle = v end
+})
+
+FarmExtraFuncsSection:Slider({
+	Name = "Prediction Strength",
+	Min = 0.1,
+	Max = 2.0,
+	Precise = 2,
+	Value = _G.autoFarmPredictionStrength,
+	Callback = function(v) _G.autoFarmPredictionStrength = v end
 })
 
 RunService.Heartbeat:Connect(function()
 	if _G.autoFarm then updateStats() end
 end)
 
-print("Skuff Auto Farm V2: Loaded!")
+Players.PlayerAdded:Connect(function(player: Player)
+	player.CharacterAdded:Connect(function(character: Instance)
+		character:WaitForChild("Humanoid").Died:Connect(function()
+			if _G.autoFarmRecentAttacked[player] and tick() - _G.autoFarmRecentAttacked[player] < 10 then
+				_G.autoFarmStats.kills += 1
+				_G.autoFarmRecentAttacked[player] = nil
+			end
+		end)
+	end)
+end)
 
--- это пизда нахуй
+for _, player in ipairs(Players:GetPlayers()) do
+	if player.Character then
+		if player.Character:FindFirstChild("Humanoid") then
+			player.Character:FindFirstChild("Humanoid").Died:Connect(function()
+				if _G.autoFarmRecentAttacked[player] and tick() - _G.autoFarmRecentAttacked[player] < 10 then
+					_G.autoFarmStats.kills += 1
+					_G.autoFarmRecentAttacked[player] = nil
+				end
+			end)
+		end
+	end
+end
+
+print("Skuff Auto Farm V2: Loaded!")
