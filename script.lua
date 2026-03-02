@@ -1,3 +1,5 @@
+print("Skuff Auto Farm: Loading...\n")
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 
@@ -8,6 +10,7 @@ local camera = workspace.CurrentCamera
 
 local Bracket = loadstring(game:HttpGet("https://github.com/AlexR32/Bracket/blob/main/BracketV32.lua"))() -- https://raw.githubusercontent.com/zedikik/BracketV32/refs/heads/main/BracketV32.lua
 
+print("Skuff Auto Farm: Shared Loading...")
 
 if not _G.autoFarm then
 	_G.autoFarm = false
@@ -34,6 +37,10 @@ if not _G.autoFarm then
 
 	_G.autoFarmPriority = {}
 end
+
+print("Skuff Auto Farm: Shared Loaded!\n")
+
+print("Skuff Auto Farm: Thread Loading...")
 
 local function AutoFarm(state: number)
 	if not state then state = _G.autoFarm == false and 1 or 0 end
@@ -388,6 +395,8 @@ local function AutoFarm(state: number)
 	end
 end
 
+print("Skuff Auto Farm: Thread Loaded!\n")
+print("Skuff Auto Farm: UI Loading...")
 
 local UI = Bracket:Window({
 	Name = "TSB AutoFarm dev test",
@@ -699,3 +708,6 @@ FarmExtraFuncsSection:Toggle({
 		_G.autoFarmPredictToggle = value
 	end
 })
+
+print("Skuff Auto Farm: UI Loaded!\n")
+print("Skuff Auto Farm: Loaded!")
