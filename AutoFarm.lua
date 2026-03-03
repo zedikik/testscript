@@ -1,4 +1,5 @@
-print("Skuff Auto Farm: Loading...\n")
+if game.PlaceId ~= 10449761463 then warn("Join to TSB Public Server!") return else print("this is main game\n") end
+print("Skuff Auto Farm: Loading...")
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -35,7 +36,7 @@ if not _G.autoFarm then
 	_G.autoFarmAntiStreakLimit = 7
 	_G.autoFarmPredictToggle = false
 	_G.autoFarmPredictionStrength = 0.85
-	
+
 	_G.autoFarmStats = {
 		kills = 0,
 		startTime = 0,
@@ -388,7 +389,7 @@ local characterData = {
 local function executeSkill(ability: {any}, target: Player)
 	if _G.autoFarmIsAttacking then return end
 	_G.autoFarmIsAttacking = true
-	
+
 	_G.autoFarmRecentAttacked[target] = tick()
 
 	print(`[AutoFarm] Executing {ability.skill} -> {target.Name}`)
